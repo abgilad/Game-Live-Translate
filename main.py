@@ -300,6 +300,40 @@ class StrokeLabel(QLabel):
 
 
 # ---------------------------------------------------------
+# History Window (Standard Window for Logs)
+# ---------------------------------------------------------
+class HistoryWindow(QWidget):
+    def __init__(self, parent=None):
+        super().__init__(None) # Independent window
+        self.setWindowTitle("היסטוריית תרגום")
+        self.resize(400, 500)
+        self.setStyleSheet("""
+            QWidget { background-color: #1e1e1e; color: #e0e0e0; font-family: 'Segoe UI', Arial; }
+            QTextEdit { background-color: #252525; border: none; padding: 10px; font-size: 14px; line-height: 1.5; }
+            QScrollBar:vertical { width: 10px; background: #2d2d2d; }
+            QScrollBar::handle:vertical { background: #4a4a4a; border-radius: 5px; }
+        """)
+        
+        layout = QVBoxLayout(self)
+        self.text_area = QTextEdit()
+        self.text_area.setReadOnly(True)
+        layout.addWidget(self.text_area)
+
+    def add_entry(self, text):
+        import datetime
+        now = datetime.datetime.now().strftime("%H:%M:%S")
+        self.text_area.append(f"<b>[{now}]</b> {text}<br>")
+        # Keep scrolled to bottom
+        scrollbar = self.text_area.verticalScrollBar()
+        scrollbar.setValue(scrollbar.maximum())
+
+    def set_all_entries(self, entries):
+        self.text_area.clear()
+        for entry in entries:
+            self.add_entry(entry)
+
+
+# ---------------------------------------------------------
 # Hebrew Translation Window (subtitle-style, transparent)
 # ---------------------------------------------------------
 class HebrewWindow(QMainWindow):
@@ -314,6 +348,9 @@ class HebrewWindow(QMainWindow):
         self._segment_spacing = self.settings["segment_spacing"]
         self._bg_alpha = self.settings["bg_alpha"]
         self._outline_width = self.settings["outline_width"]
+        
+        self.full_history_data = []
+        self.history_win = None
 
         self.resize(self.settings["window_size"][0], self.settings["window_size"][1])
         self.move(self.settings["window_pos"][0], self.settings["window_pos"][1])
@@ -350,6 +387,14 @@ class HebrewWindow(QMainWindow):
         
         ctrl_layout.addStretch()
         
+        # History Button
+        self.hist_btn = QPushButton("📜")
+        self.hist_btn.setToolTip("היסטוריה") # History
+        self.hist_btn.setFixedSize(30, 30)
+        self.hist_btn.setStyleSheet("background: transparent; color: white; font-size: 18px; border-radius: 15px;")
+        self.hist_btn.clicked.connect(self._toggle_history_window)
+        ctrl_layout.addWidget(self.hist_btn)
+
         # Settings Gear Button
         self.settings_btn = QPushButton("⚙")
         self.settings_btn.setToolTip("הגדרות")
@@ -585,7 +630,12 @@ class HebrewWindow(QMainWindow):
         count = self.history_layout.count()
         self.history_layout.insertWidget(count - 1, lbl)
         
-        # Limit history to 2 segments (one top, one bottom)
+        # Sync with full history window
+        self.full_history_data.append(text)
+        if self.history_win:
+            self.history_win.add_entry(text)
+
+        # Limit main window history to 2 segments (one top, one bottom)
         # count includes labels + 1 stretch
         if self.history_layout.count() > 3: # 2 labels + 1 stretch
             item = self.history_layout.takeAt(0)
@@ -598,6 +648,22 @@ class HebrewWindow(QMainWindow):
     def _scroll_to_bottom(self):
         v_bar = self.scroll_area.verticalScrollBar()
         v_bar.setValue(v_bar.maximum())
+
+    def _toggle_history_window(self):
+        if not self.history_win:
+            self.history_win = HistoryWindow()
+            self.history_win.set_all_entries(self.full_history_data)
+        
+        if self.history_win.isVisible():
+            self.history_win.hide()
+        else:
+            self.history_win.show()
+            self.history_win.activateWindow()
+
+    def closeEvent(self, event):
+        if self.history_win:
+            self.history_win.close()
+        super().closeEvent(event)
 
 
 # ---------------------------------------------------------
