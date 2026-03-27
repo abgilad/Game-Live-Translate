@@ -186,7 +186,7 @@ class StrokeLabel(QLabel):
         font.setPointSize(self.font_size)
         font.setBold(True)
         metrics = QFontMetrics(font)
-        line_h = metrics.height() * 1.2 # Adding 20% for stroke and leading
+        line_h = metrics.height() * 1.5 # 50% extra space for better subtitle look
         
         # Approximate size with wrapping
         max_w = self.width() if self.width() > 100 else 800
@@ -215,7 +215,7 @@ class StrokeLabel(QLabel):
         font.setBold(True)
         
         metrics = QFontMetrics(font)
-        line_h = metrics.height() * 1.2
+        line_h = metrics.height() * 1.5
 
         # Handle word wrapping manually for the painter path
         words = self.text().split(' ')
@@ -350,7 +350,7 @@ class HebrewWindow(QMainWindow):
         self.history_widget.setStyleSheet("background: transparent;")
         self.history_layout = QVBoxLayout(self.history_widget)
         self.history_layout.setContentsMargins(0, 0, 0, 0)
-        self.history_layout.setSpacing(10)
+        self.history_layout.setSpacing(25) # More space between segments
         self.history_layout.addStretch() # Push everything to bottom
         
         self.scroll_area.setWidget(self.history_widget)
