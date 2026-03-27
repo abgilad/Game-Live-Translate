@@ -8,8 +8,8 @@ from deep_translator import GoogleTranslator
 from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout,
                              QComboBox, QTextEdit, QLabel, QPushButton,
                              QHBoxLayout, QSlider, QScrollArea)
-from PyQt6.QtCore import QThread, pyqtSignal, Qt, QPoint, QTimer, QSize
-from PyQt6.QtGui import QTextOption, QPainter, QPainterPath, QPen, QFontMetrics, QFont, QColor
+from PyQt6.QtCore import QThread, pyqtSignal, Qt, QPoint, QTimer, QSize, QRectF
+from PyQt6.QtGui import QTextOption, QPainter, QPainterPath, QPen, QFontMetrics, QFontMetricsF, QFont, QColor
 
 # ---- Settings Management ----
 SETTINGS_FILE = os.path.join(os.path.dirname(__file__), "settings.json")
@@ -205,7 +205,7 @@ class StrokeLabel(QLabel):
         self.outline_width = outline_width
         self.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.setStyleSheet("background: transparent; color: white;")
-        self.setWordWrap(True)
+        self.setWordWrap(False) # Manual wrapping only
 
     def set_font_size(self, size):
         self.font_size = size
@@ -227,10 +227,10 @@ class StrokeLabel(QLabel):
         font = QFont(self.font())
         font.setPointSize(self.font_size)
         font.setBold(True)
-        metrics = QFontMetrics(font)
+        metrics = QFontMetricsF(font)
         
-        # line_h must account for the stroke width
-        line_h = (metrics.height() + self.outline_width) * self.line_spacing
+        # Robust line height: lineSpacing + stroke + 15% safety gap
+        line_h = metrics.lineSpacing() + self.outline_width + (self.font_size * 0.15)
         
         # Approximate size with wrapping
         max_w = self.width() if self.width() > 100 else 800
@@ -238,7 +238,6 @@ class StrokeLabel(QLabel):
         lines_count = 1
         curr_w = 0
         for w in words:
-            # Word width also needs some extra room for the stroke on sides
             w_w = metrics.horizontalAdvance(w + " ") + self.outline_width
             if curr_w + w_w > max_w - 40:
                 lines_count += 1
@@ -246,7 +245,8 @@ class StrokeLabel(QLabel):
             else:
                 curr_w += w_w
         
-        return QSize(max_w, int(lines_count * line_h) + self.outline_width + 20)
+        total_h = int(lines_count * line_h) + self.outline_width + 40
+        return QSize(max_w, total_h)
 
     def paintEvent(self, event):
         if not self.text():
@@ -259,8 +259,8 @@ class StrokeLabel(QLabel):
         font.setPointSize(self.font_size)
         font.setBold(True)
         
-        metrics = QFontMetrics(font)
-        line_h = (metrics.height() + self.outline_width) * self.line_spacing
+        metrics = QFontMetricsF(font)
+        line_h = metrics.lineSpacing() + self.outline_width + (self.font_size * 0.15)
 
         # Handle word wrapping manually for the painter path
         words = self.text().split(' ')
@@ -273,17 +273,18 @@ class StrokeLabel(QLabel):
             if metrics.horizontalAdvance(test_line) < max_width:
                 current_line = test_line
             else:
-                lines.append(current_line)
+                if current_line: lines.append(current_line)
                 current_line = word
-        lines.append(current_line)
+        if current_line: lines.append(current_line)
 
         total_height = len(lines) * line_h
-        # Center vertically and account for ascent
-        start_y = (self.height() - total_height) / 2 + metrics.ascent() + self.outline_width/2
+        # Adjust start_y: center the block of text within the label
+        start_y = (self.height() - total_height) / 2 + metrics.ascent() + (self.font_size * 0.07)
 
         for i, line in enumerate(lines):
             path = QPainterPath()
             line_w = metrics.horizontalAdvance(line)
+            # Center each line horizontally
             x = (self.width() - line_w) / 2
             y = start_y + i * line_h
             path.addText(x, y, font, line)
@@ -582,12 +583,14 @@ class HebrewWindow(QMainWindow):
         count = self.history_layout.count()
         self.history_layout.insertWidget(count - 1, lbl)
         
-        # Limit history (e.g. 100 entries)
-        if count > 101: 
+        # Limit history to 20 segments
+        # count includes labels + 1 stretch + maybe settings panel? 
+        # Actually it's labels + stretch.
+        if self.history_layout.count() > 21: # 20 labels + 1 stretch
             item = self.history_layout.takeAt(0)
             if item and item.widget():
                 item.widget().deleteLater()
-
+        
         # Auto-scroll to bottom
         QTimer.singleShot(50, self._scroll_to_bottom)
 
