@@ -175,21 +175,26 @@ class HebrewWindow(QMainWindow):
         self.resize(900, 220)
         self.setWindowFlags(
             Qt.WindowType.WindowStaysOnTopHint |
-            Qt.WindowType.FramelessWindowHint
+            Qt.WindowType.FramelessWindowHint |
+            Qt.WindowType.NoDropShadowWindowHint
         )
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
+        self.setAttribute(Qt.WidgetAttribute.WA_NoSystemBackground)
         self._drag_pos = None
-        self._bg_alpha = 160  # default background opacity
+        self._bg_alpha = 160
 
         central_widget = QWidget()
         central_widget.setObjectName("subtitle_bg")
         self.setCentralWidget(central_widget)
         layout = QVBoxLayout(central_widget)
         layout.setContentsMargins(12, 8, 12, 8)
-        layout.setSpacing(4)
+        layout.setSpacing(2)
 
-        # ---- Control bar (drag + opacity slider + close) ----
-        ctrl = QHBoxLayout()
+        # ---- Control bar (hidden by default, shown on hover) ----
+        self.ctrl_widget = QWidget()
+        self.ctrl_widget.setVisible(False)
+        ctrl = QHBoxLayout(self.ctrl_widget)
+        ctrl.setContentsMargins(0, 0, 0, 0)
 
         drag_lbl = QLabel("⠿ תרגום לעברית")
         drag_lbl.setStyleSheet("color: rgba(255,255,255,160); font-size: 11px;")
@@ -217,16 +222,22 @@ class HebrewWindow(QMainWindow):
         close_btn.clicked.connect(self.close)
         ctrl.addWidget(close_btn)
 
-        layout.addLayout(ctrl)
+        layout.addWidget(self.ctrl_widget)
 
         # ---- Hebrew text area ----
         self.text_edit = QTextEdit()
         self.text_edit.setReadOnly(True)
         self.text_edit.setLayoutDirection(Qt.LayoutDirection.RightToLeft)
+        # Force transparency for viewport
+        self.text_edit.viewport().setAutoFillBackground(False)
+        self.text_edit.viewport().setStyleSheet("background: transparent;")
         self.text_edit.setStyleSheet(
             "background: transparent; border: none; color: white;"
+            "QScrollBar:vertical { width: 6px; background: transparent; }"
+            "QScrollBar::handle:vertical { background: rgba(255,255,255,100); border-radius: 3px; }"
+            "QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height: 0px; }"
         )
-        self.text_edit.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.text_edit.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
         font = self.text_edit.font()
         font.setPointSize(32)
         self.text_edit.setFont(font)
@@ -242,6 +253,14 @@ class HebrewWindow(QMainWindow):
             f"  border-radius: 14px;"
             f"}}"
         )
+
+    def enterEvent(self, event):
+        self.ctrl_widget.setVisible(True)
+        super().enterEvent(event)
+
+    def leaveEvent(self, event):
+        self.ctrl_widget.setVisible(False)
+        super().leaveEvent(event)
 
     # ---- Drag support ----
     def mousePressEvent(self, event):
