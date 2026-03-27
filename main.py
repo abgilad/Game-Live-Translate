@@ -8,8 +8,8 @@ from deep_translator import GoogleTranslator
 from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout,
                              QComboBox, QTextEdit, QLabel, QPushButton,
                              QHBoxLayout, QSlider)
-from PyQt6.QtCore import QThread, pyqtSignal, Qt, QPoint
-from PyQt6.QtGui import QTextOption
+from PyQt6.QtCore import QThread, pyqtSignal, Qt, QPoint, QTimer
+from PyQt6.QtGui import QTextOption, QPainter, QPainterPath, QPen, QFontMetrics, QFont, QColor
 
 TARGET_SR = 16000
 
@@ -166,6 +166,67 @@ class TranslationWorker(QThread):
 
 
 # ---------------------------------------------------------
+# Custom Label with Text Outline (Stroke)
+# ---------------------------------------------------------
+class StrokeLabel(QLabel):
+    def __init__(self, text="", font_size=32, parent=None):
+        super().__init__(text, parent)
+        self.font_size = font_size
+        self.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.setStyleSheet("background: transparent; color: white;")
+
+    def set_font_size(self, size):
+        self.font_size = size
+        self.update()
+
+    def paintEvent(self, event):
+        if not self.text():
+            return
+
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+
+        font = QFont(self.font())
+        font.setPointSize(self.font_size)
+        font.setBold(True)
+        
+        metrics = QFontMetrics(font)
+        # Handle word wrapping manually for the painter path
+        words = self.text().split(' ')
+        lines = []
+        current_line = ""
+        max_width = self.width() - 20
+        
+        for word in words:
+            test_line = (current_line + " " + word).strip()
+            if metrics.horizontalAdvance(test_line) < max_width:
+                current_line = test_line
+            else:
+                lines.append(current_line)
+                current_line = word
+        lines.append(current_line)
+
+        total_height = len(lines) * metrics.height()
+        start_y = (self.height() - total_height) / 2 + metrics.ascent()
+
+        for i, line in enumerate(lines):
+            path = QPainterPath()
+            line_w = metrics.horizontalAdvance(line)
+            x = (self.width() - line_w) / 2
+            y = start_y + i * metrics.height()
+            path.addText(x, y, font, line)
+
+            # Black outline
+            pen = QPen(QColor(0, 0, 0), 5)
+            pen.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
+            painter.setPen(pen)
+            painter.drawPath(path)
+
+            # White fill
+            painter.fillPath(path, QColor(255, 255, 255))
+
+
+# ---------------------------------------------------------
 # Hebrew Translation Window (subtitle-style, transparent)
 # ---------------------------------------------------------
 class HebrewWindow(QMainWindow):
@@ -182,6 +243,12 @@ class HebrewWindow(QMainWindow):
         self.setAttribute(Qt.WidgetAttribute.WA_NoSystemBackground)
         self._drag_pos = None
         self._bg_alpha = 160
+        self._font_size = 32
+
+        # Timer to hide controls
+        self.hide_timer = QTimer()
+        self.hide_timer.setSingleShot(True)
+        self.hide_timer.timeout.connect(self._hide_controls)
 
         central_widget = QWidget()
         central_widget.setObjectName("subtitle_bg")
@@ -194,23 +261,38 @@ class HebrewWindow(QMainWindow):
         self.ctrl_widget = QWidget()
         self.ctrl_widget.setVisible(False)
         ctrl = QHBoxLayout(self.ctrl_widget)
-        ctrl.setContentsMargins(0, 0, 0, 0)
+        ctrl.setContentsMargins(5, 2, 5, 2)
+        ctrl.setSpacing(10)
 
-        drag_lbl = QLabel("⠿ תרגום לעברית")
-        drag_lbl.setStyleSheet("color: rgba(255,255,255,160); font-size: 11px;")
+        drag_lbl = QLabel("⠿ תרגום")
+        drag_lbl.setStyleSheet("color: rgba(255,255,255,180); font-size: 11px; font-weight: bold;")
         ctrl.addWidget(drag_lbl)
-        ctrl.addStretch()
-
+        
+        # Opacity Control
         opacity_lbl = QLabel("רקע:")
         opacity_lbl.setStyleSheet("color: rgba(255,255,255,160); font-size: 11px;")
         ctrl.addWidget(opacity_lbl)
-
         self.opacity_slider = QSlider(Qt.Orientation.Horizontal)
         self.opacity_slider.setRange(0, 255)
         self.opacity_slider.setValue(self._bg_alpha)
-        self.opacity_slider.setFixedWidth(100)
+        self.opacity_slider.setFixedWidth(80)
         self.opacity_slider.valueChanged.connect(self._update_bg)
+        self.opacity_slider.valueChanged.connect(self._reset_hide_timer)
         ctrl.addWidget(self.opacity_slider)
+
+        # Font Size Control
+        font_lbl = QLabel("גודל:")
+        font_lbl.setStyleSheet("color: rgba(255,255,255,160); font-size: 11px;")
+        ctrl.addWidget(font_lbl)
+        self.font_slider = QSlider(Qt.Orientation.Horizontal)
+        self.font_slider.setRange(12, 72)
+        self.font_slider.setValue(self._font_size)
+        self.font_slider.setFixedWidth(80)
+        self.font_slider.valueChanged.connect(self._update_font_size)
+        self.font_slider.valueChanged.connect(self._reset_hide_timer)
+        ctrl.addWidget(self.font_slider)
+
+        ctrl.addStretch()
 
         close_btn = QPushButton("✕")
         close_btn.setFixedSize(22, 22)
@@ -224,24 +306,9 @@ class HebrewWindow(QMainWindow):
 
         layout.addWidget(self.ctrl_widget)
 
-        # ---- Hebrew text area ----
-        self.text_edit = QTextEdit()
-        self.text_edit.setReadOnly(True)
-        self.text_edit.setLayoutDirection(Qt.LayoutDirection.RightToLeft)
-        # Force transparency for viewport
-        self.text_edit.viewport().setAutoFillBackground(False)
-        self.text_edit.viewport().setStyleSheet("background: transparent;")
-        self.text_edit.setStyleSheet(
-            "background: transparent; border: none; color: white;"
-            "QScrollBar:vertical { width: 6px; background: transparent; }"
-            "QScrollBar::handle:vertical { background: rgba(255,255,255,100); border-radius: 3px; }"
-            "QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height: 0px; }"
-        )
-        self.text_edit.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
-        font = self.text_edit.font()
-        font.setPointSize(32)
-        self.text_edit.setFont(font)
-        layout.addWidget(self.text_edit)
+        # ---- Hebrew text area (Custom Outlined Label) ----
+        self.subtitle_label = StrokeLabel(font_size=self._font_size)
+        layout.addWidget(self.subtitle_label, stretch=1)
 
         self._update_bg(self._bg_alpha)
 
@@ -254,33 +321,65 @@ class HebrewWindow(QMainWindow):
             f"}}"
         )
 
-    def enterEvent(self, event):
+    def _update_font_size(self, value):
+        self._font_size = value
+        self.subtitle_label.set_font_size(value)
+
+    def _show_controls(self):
         self.ctrl_widget.setVisible(True)
+        self.hide_timer.start(3000)
+
+    def _hide_controls(self):
+        self.ctrl_widget.setVisible(False)
+
+    def _reset_hide_timer(self):
+        if self.ctrl_widget.isVisible():
+            self.hide_timer.start(3000)
+
+    def enterEvent(self, event):
+        self._show_controls()
         super().enterEvent(event)
 
     def leaveEvent(self, event):
-        self.ctrl_widget.setVisible(False)
+        # We don't hide immediately on leave, let the timer handle it
+        # or hide faster if we want. Let's keep the timer.
         super().leaveEvent(event)
 
-    # ---- Drag support ----
+    # ---- Drag & Resize support ----
     def mousePressEvent(self, event):
         if event.button() == Qt.MouseButton.LeftButton:
-            self._drag_pos = event.globalPosition().toPoint() - self.frameGeometry().topLeft()
+            pos = event.position().toPoint()
+            rect = self.rect()
+            edge_margin = 15
+            
+            # Check if we're clicking near the bottom-right corner for resizing
+            if (rect.width() - pos.x() < edge_margin and 
+                rect.height() - pos.y() < edge_margin):
+                self._resizing = True
+            else:
+                self._resizing = False
+                self._drag_pos = event.globalPosition().toPoint() - self.frameGeometry().topLeft()
+            self._show_controls()
 
     def mouseMoveEvent(self, event):
-        if self._drag_pos and event.buttons() == Qt.MouseButton.LeftButton:
-            self.move(event.globalPosition().toPoint() - self._drag_pos)
+        self._show_controls()
+        if event.buttons() == Qt.MouseButton.LeftButton:
+            if getattr(self, '_resizing', False):
+                # Resizing
+                new_size = event.globalPosition().toPoint() - self.frameGeometry().topLeft()
+                self.resize(max(300, new_size.x()), max(100, new_size.y()))
+            elif getattr(self, '_drag_pos', None):
+                # Dragging
+                self.move(event.globalPosition().toPoint() - self._drag_pos)
 
     def mouseReleaseEvent(self, event):
         self._drag_pos = None
+        self._resizing = False
 
     def append_text(self, text):
-        safe = text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
-        self.text_edit.append(
-            f'<p dir="rtl" align="center" style="font-size:32pt; color:white;">{safe}</p>'
-        )
-        scrollbar = self.text_edit.verticalScrollBar()
-        scrollbar.setValue(scrollbar.maximum())
+        # In a subtitle window, we usually only show the latest translation
+        # to avoid clutter. Or we can keep a small buffer.
+        self.subtitle_label.setText(text)
 
 
 # ---------------------------------------------------------
@@ -365,7 +464,7 @@ class LiveTranslateApp(QMainWindow):
         self.btn_stop.setEnabled(True)
         self.device_combo.setEnabled(False)
         self.text_edit.clear()
-        self.hebrew_window.text_edit.clear()
+        self.hebrew_window.subtitle_label.clear()
 
         with self.audio_queue.mutex:
             self.audio_queue.queue.clear()
