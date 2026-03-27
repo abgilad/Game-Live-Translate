@@ -1,4 +1,4 @@
-import sys
+import sys, json, os
 import queue
 import numpy as np
 import pyaudiowpatch as pyaudio
@@ -10,6 +10,35 @@ from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout,
                              QHBoxLayout, QSlider, QScrollArea)
 from PyQt6.QtCore import QThread, pyqtSignal, Qt, QPoint, QTimer, QSize
 from PyQt6.QtGui import QTextOption, QPainter, QPainterPath, QPen, QFontMetrics, QFont, QColor
+
+# ---- Settings Management ----
+SETTINGS_FILE = os.path.join(os.path.dirname(__file__), "settings.json")
+
+DEFAULT_SETTINGS = {
+    "font_size": 36,
+    "line_spacing": 1.5,
+    "segment_spacing": 25,
+    "bg_alpha": 160,
+    "outline_width": 5,
+    "window_size": [800, 300],
+    "window_pos": [100, 100]
+}
+
+def load_settings():
+    try:
+        if os.path.exists(SETTINGS_FILE):
+            with open(SETTINGS_FILE, 'r', encoding='utf-8') as f:
+                return {**DEFAULT_SETTINGS, **json.load(f)}
+    except Exception as e:
+        print(f"Error loading settings: {e}")
+    return DEFAULT_SETTINGS.copy()
+
+def save_settings(settings):
+    try:
+        with open(SETTINGS_FILE, 'w', encoding='utf-8') as f:
+            json.dump(settings, f, ensure_ascii=False, indent=4)
+    except Exception as e:
+        print(f"Error saving settings: {e}")
 
 TARGET_SR = 16000
 
@@ -169,15 +198,28 @@ class TranslationWorker(QThread):
 # Custom Label with Text Outline (Stroke)
 # ---------------------------------------------------------
 class StrokeLabel(QLabel):
-    def __init__(self, text="", font_size=32, parent=None):
+    def __init__(self, text="", font_size=32, line_spacing=1.5, outline_width=5, parent=None):
         super().__init__(text, parent)
         self.font_size = font_size
+        self.line_spacing = line_spacing
+        self.outline_width = outline_width
         self.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.setStyleSheet("background: transparent; color: white;")
-        self.setWordWrap(True) # This won't affect my manual paint but it's good practice
+        self.setWordWrap(True)
 
     def set_font_size(self, size):
         self.font_size = size
+        self.update_all()
+
+    def set_line_spacing(self, spacing):
+        self.line_spacing = spacing
+        self.update_all()
+
+    def set_outline_width(self, width):
+        self.outline_width = width
+        self.update_all()
+
+    def update_all(self):
         self.update()
         self.updateGeometry()
 
@@ -186,22 +228,22 @@ class StrokeLabel(QLabel):
         font.setPointSize(self.font_size)
         font.setBold(True)
         metrics = QFontMetrics(font)
-        line_h = metrics.height() * 1.5 # 50% extra space for better subtitle look
+        line_h = metrics.height() * self.line_spacing
         
         # Approximate size with wrapping
         max_w = self.width() if self.width() > 100 else 800
         words = self.text().split(' ')
-        lines = 1
+        lines_count = 1
         curr_w = 0
         for w in words:
             w_w = metrics.horizontalAdvance(w + " ")
-            if curr_w + w_w > max_w - 30:
-                lines += 1
+            if curr_w + w_w > max_w - 40:
+                lines_count += 1
                 curr_w = w_w
             else:
                 curr_w += w_w
         
-        return QSize(max_w, int(lines * line_h) + 20)
+        return QSize(max_w, int(lines_count * line_h) + 20)
 
     def paintEvent(self, event):
         if not self.text():
@@ -215,13 +257,13 @@ class StrokeLabel(QLabel):
         font.setBold(True)
         
         metrics = QFontMetrics(font)
-        line_h = metrics.height() * 1.5
+        line_h = metrics.height() * self.line_spacing
 
         # Handle word wrapping manually for the painter path
         words = self.text().split(' ')
         lines = []
         current_line = ""
-        max_width = self.width() - 30
+        max_width = self.width() - 40
         
         for word in words:
             test_line = (current_line + " " + word).strip()
@@ -242,8 +284,8 @@ class StrokeLabel(QLabel):
             y = start_y + i * line_h
             path.addText(x, y, font, line)
 
-            # Black outline
-            pen = QPen(QColor(0, 0, 0), 5)
+            # Customizable outline
+            pen = QPen(QColor(0, 0, 0), self.outline_width)
             pen.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
             painter.setPen(pen)
             painter.drawPath(path)
@@ -259,78 +301,95 @@ class HebrewWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("תרגום לעברית")
-        self.resize(900, 220)
+        
+        # Load persistent settings
+        self.settings = load_settings()
+        self._font_size = self.settings["font_size"]
+        self._line_spacing = self.settings["line_spacing"]
+        self._segment_spacing = self.settings["segment_spacing"]
+        self._bg_alpha = self.settings["bg_alpha"]
+        self._outline_width = self.settings["outline_width"]
+
+        self.resize(self.settings["window_size"][0], self.settings["window_size"][1])
+        self.move(self.settings["window_pos"][0], self.settings["window_pos"][1])
+        
         self.setWindowFlags(
             Qt.WindowType.WindowStaysOnTopHint |
             Qt.WindowType.FramelessWindowHint |
-            Qt.WindowType.NoDropShadowWindowHint
+            Qt.WindowType.NoDropShadowWindowHint |
+            Qt.WindowType.Tool
         )
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
         self.setAttribute(Qt.WidgetAttribute.WA_NoSystemBackground)
-        self._drag_pos = None
-        self._bg_alpha = 160
-        self._font_size = 32
-
-        # Timer to hide controls
-        self.hide_timer = QTimer()
-        self.hide_timer.setSingleShot(True)
-        self.hide_timer.timeout.connect(self._hide_controls)
-
-        central_widget = QWidget()
-        central_widget.setObjectName("subtitle_bg")
-        self.setCentralWidget(central_widget)
-        layout = QVBoxLayout(central_widget)
-        layout.setContentsMargins(12, 8, 12, 8)
-        layout.setSpacing(2)
-
-        # ---- Control bar (hidden by default, shown on hover) ----
-        self.ctrl_widget = QWidget()
-        self.ctrl_widget.setVisible(False)
-        ctrl = QHBoxLayout(self.ctrl_widget)
-        ctrl.setContentsMargins(5, 2, 5, 2)
-        ctrl.setSpacing(10)
-
-        drag_lbl = QLabel("⠿ תרגום")
-        drag_lbl.setStyleSheet("color: rgba(255,255,255,180); font-size: 11px; font-weight: bold;")
-        ctrl.addWidget(drag_lbl)
         
-        # Opacity Control
-        opacity_lbl = QLabel("רקע:")
-        opacity_lbl.setStyleSheet("color: rgba(255,255,255,160); font-size: 11px;")
-        ctrl.addWidget(opacity_lbl)
-        self.opacity_slider = QSlider(Qt.Orientation.Horizontal)
-        self.opacity_slider.setRange(0, 255)
-        self.opacity_slider.setValue(self._bg_alpha)
-        self.opacity_slider.setFixedWidth(80)
-        self.opacity_slider.valueChanged.connect(self._update_bg)
-        self.opacity_slider.valueChanged.connect(self._reset_hide_timer)
-        ctrl.addWidget(self.opacity_slider)
+        # --- UI Setup ---
+        central = QWidget()
+        central.setObjectName("subtitle_bg")
+        self.setCentralWidget(central)
+        
+        layout = QVBoxLayout(central)
+        layout.setContentsMargins(15, 10, 15, 15)
+        layout.setSpacing(0)
 
-        # Font Size Control
-        font_lbl = QLabel("גודל:")
-        font_lbl.setStyleSheet("color: rgba(255,255,255,160); font-size: 11px;")
-        ctrl.addWidget(font_lbl)
-        self.font_slider = QSlider(Qt.Orientation.Horizontal)
-        self.font_slider.setRange(12, 72)
-        self.font_slider.setValue(self._font_size)
-        self.font_slider.setFixedWidth(80)
-        self.font_slider.valueChanged.connect(self._update_font_size)
-        self.font_slider.valueChanged.connect(self._reset_hide_timer)
-        ctrl.addWidget(self.font_slider)
-
-        ctrl.addStretch()
-
-        close_btn = QPushButton("✕")
-        close_btn.setFixedSize(22, 22)
-        close_btn.setStyleSheet(
-            "QPushButton { background: rgba(255,255,255,40); color: white; "
-            "border: none; border-radius: 11px; font-size: 12px; }"
-            "QPushButton:hover { background: rgba(200,50,50,200); }"
-        )
-        close_btn.clicked.connect(self.close)
-        ctrl.addWidget(close_btn)
+        # Control Bar (Hidden by default, shown on hover)
+        self.ctrl_widget = QWidget()
+        self.ctrl_widget.setFixedHeight(40)
+        self.ctrl_widget.setVisible(False)
+        ctrl_layout = QHBoxLayout(self.ctrl_widget)
+        ctrl_layout.setContentsMargins(10, 0, 10, 0)
+        
+        # Drag Handle / Label
+        drag_lbl = QLabel("⠿ תרגום")
+        drag_lbl.setStyleSheet("color: rgba(255,255,255,150); font-size: 11px; font-weight: bold;")
+        ctrl_layout.addWidget(drag_lbl)
+        
+        ctrl_layout.addStretch()
+        
+        # Settings Gear Button
+        self.settings_btn = QPushButton("⚙")
+        self.settings_btn.setFixedSize(30, 30)
+        self.settings_btn.setCheckable(True)
+        self.settings_btn.setStyleSheet("""
+            QPushButton { 
+                background: transparent; color: white; font-size: 20px; border-radius: 15px;
+            }
+            QPushButton:hover { background: rgba(255,255,255,50); }
+            QPushButton:checked { background: rgba(255,255,255,80); color: #00ffcc; }
+        """)
+        self.settings_btn.clicked.connect(self._toggle_settings)
+        ctrl_layout.addWidget(self.settings_btn)
 
         layout.addWidget(self.ctrl_widget)
+
+        # ---- SETTINGS PANEL ----
+        self.settings_panel = QWidget()
+        self.settings_panel.setVisible(False)
+        self.settings_panel.setStyleSheet("""
+            QWidget { background: rgba(30, 30, 30, 230); border-radius: 10px; color: white; }
+            QLabel { background: transparent; font-size: 11px; color: #aaa; }
+            QSlider::handle:horizontal { background: #00ffcc; border-radius: 5px; }
+        """)
+        s_layout = QVBoxLayout(self.settings_panel)
+        s_layout.setContentsMargins(15, 15, 15, 15)
+        s_layout.setSpacing(8)
+
+        def add_setting(label_text, min_v, max_v, curr_v, callback, factor=1):
+            lbl = QLabel(label_text)
+            s_layout.addWidget(lbl)
+            slider = QSlider(Qt.Orientation.Horizontal)
+            slider.setRange(min_v, max_v)
+            slider.setValue(int(curr_v * factor))
+            slider.valueChanged.connect(lambda v: callback(v / factor))
+            s_layout.addWidget(slider)
+            return slider
+
+        self.slider_font = add_setting("Размер шрифта", 12, 120, self._font_size, self._update_font_size)
+        self.slider_line = add_setting("Межстрочный инт.", 10, 30, self._line_spacing, self._update_line_spacing, 10)
+        self.slider_segment = add_setting("Отступ между фразами", 0, 100, self._segment_spacing, self._update_segment_spacing)
+        self.slider_outline = add_setting("Толщина контура", 0, 15, self._outline_width, self._update_outline_width)
+        self.slider_bg = add_setting("Прозрачность фона", 0, 255, self._bg_alpha, self._update_bg)
+
+        layout.addWidget(self.settings_panel)
 
         # ---- Scrollable area for history ----
         self.scroll_area = QScrollArea()
@@ -341,7 +400,7 @@ class HebrewWindow(QMainWindow):
         
         # Scroll bar styling
         self.scroll_area.verticalScrollBar().setStyleSheet(
-            "QScrollBar:vertical { width: 6px; background: transparent; }"
+            "QScrollBar:vertical { width: 6px; background: rgba(255,255,255,20); border-radius: 3px; }"
             "QScrollBar::handle:vertical { background: rgba(255,255,255,100); border-radius: 3px; }"
             "QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height: 0px; }"
         )
@@ -350,13 +409,24 @@ class HebrewWindow(QMainWindow):
         self.history_widget.setStyleSheet("background: transparent;")
         self.history_layout = QVBoxLayout(self.history_widget)
         self.history_layout.setContentsMargins(0, 0, 0, 0)
-        self.history_layout.setSpacing(25) # More space between segments
+        self.history_layout.setSpacing(self._segment_spacing)
         self.history_layout.addStretch() # Push everything to bottom
         
         self.scroll_area.setWidget(self.history_widget)
         layout.addWidget(self.scroll_area, stretch=1)
 
         self._update_bg(self._bg_alpha)
+        
+        # Auto-hide timer
+        self.hide_timer = QTimer()
+        self.hide_timer.setSingleShot(True)
+        self.hide_timer.timeout.connect(self._maybe_hide_controls)
+        
+        self.setMouseTracking(True)
+        central.setMouseTracking(True)
+        
+        self._resizing = False
+        self._drag_pos = None
 
     def clear_history(self):
         # Remove all widgets except the last stretch
@@ -367,29 +437,74 @@ class HebrewWindow(QMainWindow):
         self._scroll_to_bottom()
 
     def _update_bg(self, value):
-        self._bg_alpha = value
+        self._bg_alpha = int(value)
+        self.settings["bg_alpha"] = self._bg_alpha
         self.centralWidget().setStyleSheet(
             f"QWidget#subtitle_bg {{"
-            f"  background-color: rgba(0, 0, 0, {value});"
+            f"  background-color: rgba(0, 0, 0, {self._bg_alpha});"
             f"  border-radius: 14px;"
             f"}}"
         )
+        save_settings(self.settings)
 
     def _update_font_size(self, value):
-        self._font_size = value
+        self._font_size = int(value)
+        self.settings["font_size"] = self._font_size
         # Update all existing labels
         for i in range(self.history_layout.count()):
             item = self.history_layout.itemAt(i)
             if item and item.widget():
                 if isinstance(item.widget(), StrokeLabel):
-                    item.widget().set_font_size(value)
+                    item.widget().set_font_size(self._font_size)
+        save_settings(self.settings)
+
+    def _update_line_spacing(self, value):
+        self._line_spacing = value
+        self.settings["line_spacing"] = self._line_spacing
+        for i in range(self.history_layout.count()):
+            item = self.history_layout.itemAt(i)
+            if item and item.widget():
+                if isinstance(item.widget(), StrokeLabel):
+                    item.widget().set_line_spacing(self._line_spacing)
+        save_settings(self.settings)
+
+    def _update_segment_spacing(self, value):
+        self._segment_spacing = int(value)
+        self.settings["segment_spacing"] = self._segment_spacing
+        self.history_layout.setSpacing(self._segment_spacing)
+        save_settings(self.settings)
+
+    def _update_outline_width(self, value):
+        self._outline_width = int(value)
+        self.settings["outline_width"] = self._outline_width
+        for i in range(self.history_layout.count()):
+            item = self.history_layout.itemAt(i)
+            if item and item.widget():
+                if isinstance(item.widget(), StrokeLabel):
+                    item.widget().set_outline_width(self._outline_width)
+        save_settings(self.settings)
+
+    def _toggle_settings(self, checked):
+        self.settings_panel.setVisible(checked)
+        if checked:
+            self.hide_timer.stop()
+        else:
+            self.hide_timer.start(3000)
 
     def _show_controls(self):
         self.ctrl_widget.setVisible(True)
-        self.hide_timer.start(3000)
+        self.hide_timer.stop()
+
+    def _maybe_hide_controls(self):
+        # Don't hide if settings panel is open
+        if self.settings_btn.isChecked():
+            return
+        self.ctrl_widget.setVisible(False)
+        self.settings_panel.setVisible(False)
 
     def _hide_controls(self):
-        self.ctrl_widget.setVisible(False)
+        # Legacy placeholder
+        self._maybe_hide_controls()
 
     def _reset_hide_timer(self):
         if self.ctrl_widget.isVisible():
@@ -402,6 +517,7 @@ class HebrewWindow(QMainWindow):
     def leaveEvent(self, event):
         # We don't hide immediately on leave, let the timer handle it
         # or hide faster if we want. Let's keep the timer.
+        self.hide_timer.start(500) # Shorter timer on leave
         super().leaveEvent(event)
 
     # ---- Drag & Resize support ----
@@ -417,19 +533,33 @@ class HebrewWindow(QMainWindow):
                 self._resizing = True
             else:
                 self._resizing = False
-                self._drag_pos = event.globalPosition().toPoint() - self.frameGeometry().topLeft()
+            self._drag_pos = event.globalPosition().toPoint()
             self._show_controls()
 
     def mouseMoveEvent(self, event):
+        if event.buttons() == Qt.MouseButton.LeftButton and self._drag_pos:
+            if self._resizing:
+                diff = event.globalPosition().toPoint() - self._drag_pos
+                new_w = max(400, self.width() + diff.x())
+                new_h = max(200, self.height() + diff.y())
+                self.resize(new_w, new_h)
+                self._drag_pos = event.globalPosition().toPoint()
+                self.settings["window_size"] = [new_w, new_h]
+                save_settings(self.settings)
+            else:
+                self.move(self.pos() + (event.globalPosition().toPoint() - self._drag_pos))
+                self._drag_pos = event.globalPosition().toPoint()
+                self.settings["window_pos"] = [self.x(), self.y()]
+                save_settings(self.settings)
+        
+        # Check for resize area (bottom-right 20x20)
+        if event.pos().x() > self.width() - 20 and event.pos().y() > self.height() - 20:
+            self.setCursor(Qt.CursorShape.SizeFDiagCursor)
+        else:
+            self.setCursor(Qt.CursorShape.ArrowCursor)
+        
         self._show_controls()
-        if event.buttons() == Qt.MouseButton.LeftButton:
-            if getattr(self, '_resizing', False):
-                # Resizing
-                new_size = event.globalPosition().toPoint() - self.frameGeometry().topLeft()
-                self.resize(max(300, new_size.x()), max(100, new_size.y()))
-            elif getattr(self, '_drag_pos', None):
-                # Dragging
-                self.move(event.globalPosition().toPoint() - self._drag_pos)
+        self.hide_timer.start(3000)
 
     def mouseReleaseEvent(self, event):
         self._drag_pos = None
@@ -440,7 +570,10 @@ class HebrewWindow(QMainWindow):
             return
             
         # Create a new label for history
-        lbl = StrokeLabel(text, font_size=self._font_size)
+        lbl = StrokeLabel(text, 
+                         font_size=self._font_size, 
+                         line_spacing=self._line_spacing,
+                         outline_width=self._outline_width)
         # Add before the last stretch
         count = self.history_layout.count()
         self.history_layout.insertWidget(count - 1, lbl)
