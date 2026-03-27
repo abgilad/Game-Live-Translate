@@ -174,6 +174,7 @@ class StrokeLabel(QLabel):
         self.font_size = font_size
         self.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.setStyleSheet("background: transparent; color: white;")
+        self.setWordWrap(True) # This won't affect my manual paint but it's good practice
 
     def set_font_size(self, size):
         self.font_size = size
@@ -185,6 +186,7 @@ class StrokeLabel(QLabel):
         font.setPointSize(self.font_size)
         font.setBold(True)
         metrics = QFontMetrics(font)
+        line_h = metrics.height() * 1.2 # Adding 20% for stroke and leading
         
         # Approximate size with wrapping
         max_w = self.width() if self.width() > 100 else 800
@@ -193,13 +195,13 @@ class StrokeLabel(QLabel):
         curr_w = 0
         for w in words:
             w_w = metrics.horizontalAdvance(w + " ")
-            if curr_w + w_w > max_w - 20:
+            if curr_w + w_w > max_w - 30:
                 lines += 1
                 curr_w = w_w
             else:
                 curr_w += w_w
         
-        return QSize(max_w, lines * metrics.height() + 10)
+        return QSize(max_w, int(lines * line_h) + 20)
 
     def paintEvent(self, event):
         if not self.text():
@@ -213,11 +215,13 @@ class StrokeLabel(QLabel):
         font.setBold(True)
         
         metrics = QFontMetrics(font)
+        line_h = metrics.height() * 1.2
+
         # Handle word wrapping manually for the painter path
         words = self.text().split(' ')
         lines = []
         current_line = ""
-        max_width = self.width() - 20
+        max_width = self.width() - 30
         
         for word in words:
             test_line = (current_line + " " + word).strip()
@@ -228,14 +232,14 @@ class StrokeLabel(QLabel):
                 current_line = word
         lines.append(current_line)
 
-        total_height = len(lines) * metrics.height()
+        total_height = len(lines) * line_h
         start_y = (self.height() - total_height) / 2 + metrics.ascent()
 
         for i, line in enumerate(lines):
             path = QPainterPath()
             line_w = metrics.horizontalAdvance(line)
             x = (self.width() - line_w) / 2
-            y = start_y + i * metrics.height()
+            y = start_y + i * line_h
             path.addText(x, y, font, line)
 
             # Black outline
