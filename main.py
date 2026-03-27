@@ -6,8 +6,9 @@ from scipy import signal as scipy_signal
 from faster_whisper import WhisperModel
 from deep_translator import GoogleTranslator
 from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout,
-                             QComboBox, QTextEdit, QLabel, QPushButton, QHBoxLayout)
-from PyQt6.QtCore import QThread, pyqtSignal, Qt
+                             QComboBox, QTextEdit, QLabel, QPushButton,
+                             QHBoxLayout, QSlider)
+from PyQt6.QtCore import QThread, pyqtSignal, Qt, QPoint
 from PyQt6.QtGui import QTextOption
 
 TARGET_SR = 16000
@@ -111,6 +112,10 @@ class WhisperWorker(QThread):
                         beam_size=5,
                         vad_filter=True,
                         vad_parameters=dict(min_silence_duration_ms=500),
+                        condition_on_previous_text=False,
+                        no_repeat_ngram_size=3,
+                        compression_ratio_threshold=2.4,
+                        log_prob_threshold=-1.0,
                     )
                     text = " ".join([s.text for s in segments])
                     if text.strip():
@@ -161,37 +166,99 @@ class TranslationWorker(QThread):
 
 
 # ---------------------------------------------------------
-# Hebrew Translation Window (RTL)
+# Hebrew Translation Window (subtitle-style, transparent)
 # ---------------------------------------------------------
 class HebrewWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("תרגום לעברית")
-        self.resize(650, 350)
-        self.setWindowFlags(self.windowFlags() | Qt.WindowType.WindowStaysOnTopHint)
+        self.resize(900, 220)
+        self.setWindowFlags(
+            Qt.WindowType.WindowStaysOnTopHint |
+            Qt.WindowType.FramelessWindowHint
+        )
+        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
+        self._drag_pos = None
+        self._bg_alpha = 160  # default background opacity
 
         central_widget = QWidget()
+        central_widget.setObjectName("subtitle_bg")
         self.setCentralWidget(central_widget)
         layout = QVBoxLayout(central_widget)
+        layout.setContentsMargins(12, 8, 12, 8)
+        layout.setSpacing(4)
 
-        lbl = QLabel("תרגום לעברית — Hebrew Translation")
-        lbl.setLayoutDirection(Qt.LayoutDirection.RightToLeft)
-        lbl.setAlignment(Qt.AlignmentFlag.AlignRight)
-        lbl.setStyleSheet("color: gray; font-size: 11px;")
-        layout.addWidget(lbl)
+        # ---- Control bar (drag + opacity slider + close) ----
+        ctrl = QHBoxLayout()
 
+        drag_lbl = QLabel("⠿ תרגום לעברית")
+        drag_lbl.setStyleSheet("color: rgba(255,255,255,160); font-size: 11px;")
+        ctrl.addWidget(drag_lbl)
+        ctrl.addStretch()
+
+        opacity_lbl = QLabel("רקע:")
+        opacity_lbl.setStyleSheet("color: rgba(255,255,255,160); font-size: 11px;")
+        ctrl.addWidget(opacity_lbl)
+
+        self.opacity_slider = QSlider(Qt.Orientation.Horizontal)
+        self.opacity_slider.setRange(0, 255)
+        self.opacity_slider.setValue(self._bg_alpha)
+        self.opacity_slider.setFixedWidth(100)
+        self.opacity_slider.valueChanged.connect(self._update_bg)
+        ctrl.addWidget(self.opacity_slider)
+
+        close_btn = QPushButton("✕")
+        close_btn.setFixedSize(22, 22)
+        close_btn.setStyleSheet(
+            "QPushButton { background: rgba(255,255,255,40); color: white; "
+            "border: none; border-radius: 11px; font-size: 12px; }"
+            "QPushButton:hover { background: rgba(200,50,50,200); }"
+        )
+        close_btn.clicked.connect(self.close)
+        ctrl.addWidget(close_btn)
+
+        layout.addLayout(ctrl)
+
+        # ---- Hebrew text area ----
         self.text_edit = QTextEdit()
         self.text_edit.setReadOnly(True)
         self.text_edit.setLayoutDirection(Qt.LayoutDirection.RightToLeft)
+        self.text_edit.setStyleSheet(
+            "background: transparent; border: none; color: white;"
+        )
+        self.text_edit.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         font = self.text_edit.font()
-        font.setPointSize(24)
+        font.setPointSize(32)
         self.text_edit.setFont(font)
         layout.addWidget(self.text_edit)
+
+        self._update_bg(self._bg_alpha)
+
+    def _update_bg(self, value):
+        self._bg_alpha = value
+        self.centralWidget().setStyleSheet(
+            f"QWidget#subtitle_bg {{"
+            f"  background-color: rgba(0, 0, 0, {value});"
+            f"  border-radius: 14px;"
+            f"}}"
+        )
+
+    # ---- Drag support ----
+    def mousePressEvent(self, event):
+        if event.button() == Qt.MouseButton.LeftButton:
+            self._drag_pos = event.globalPosition().toPoint() - self.frameGeometry().topLeft()
+
+    def mouseMoveEvent(self, event):
+        if self._drag_pos and event.buttons() == Qt.MouseButton.LeftButton:
+            self.move(event.globalPosition().toPoint() - self._drag_pos)
+
+    def mouseReleaseEvent(self, event):
+        self._drag_pos = None
 
     def append_text(self, text):
         safe = text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
         self.text_edit.append(
-            f'<p dir="rtl" align="right" style="font-size:24pt;">{safe}</p>'
+            f'<p dir="rtl" align="center" style="font-size:32pt; color:white;">{safe}</p>'
         )
         scrollbar = self.text_edit.verticalScrollBar()
         scrollbar.setValue(scrollbar.maximum())
