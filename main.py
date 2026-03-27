@@ -7,8 +7,8 @@ from faster_whisper import WhisperModel
 from deep_translator import GoogleTranslator
 from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout,
                              QComboBox, QTextEdit, QLabel, QPushButton,
-                             QHBoxLayout, QSlider)
-from PyQt6.QtCore import QThread, pyqtSignal, Qt, QPoint, QTimer
+                             QHBoxLayout, QSlider, QScrollArea)
+from PyQt6.QtCore import QThread, pyqtSignal, Qt, QPoint, QTimer, QSize
 from PyQt6.QtGui import QTextOption, QPainter, QPainterPath, QPen, QFontMetrics, QFont, QColor
 
 TARGET_SR = 16000
@@ -178,6 +178,28 @@ class StrokeLabel(QLabel):
     def set_font_size(self, size):
         self.font_size = size
         self.update()
+        self.updateGeometry()
+
+    def sizeHint(self):
+        font = QFont(self.font())
+        font.setPointSize(self.font_size)
+        font.setBold(True)
+        metrics = QFontMetrics(font)
+        
+        # Approximate size with wrapping
+        max_w = self.width() if self.width() > 100 else 800
+        words = self.text().split(' ')
+        lines = 1
+        curr_w = 0
+        for w in words:
+            w_w = metrics.horizontalAdvance(w + " ")
+            if curr_w + w_w > max_w - 20:
+                lines += 1
+                curr_w = w_w
+            else:
+                curr_w += w_w
+        
+        return QSize(max_w, lines * metrics.height() + 10)
 
     def paintEvent(self, event):
         if not self.text():
@@ -306,9 +328,29 @@ class HebrewWindow(QMainWindow):
 
         layout.addWidget(self.ctrl_widget)
 
-        # ---- Hebrew text area (Custom Outlined Label) ----
-        self.subtitle_label = StrokeLabel(font_size=self._font_size)
-        layout.addWidget(self.subtitle_label, stretch=1)
+        # ---- Scrollable area for history ----
+        self.scroll_area = QScrollArea()
+        self.scroll_area.setWidgetResizable(True)
+        self.scroll_area.setStyleSheet("background: transparent; border: none;")
+        self.scroll_area.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        self.scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        
+        # Scroll bar styling
+        self.scroll_area.verticalScrollBar().setStyleSheet(
+            "QScrollBar:vertical { width: 6px; background: transparent; }"
+            "QScrollBar::handle:vertical { background: rgba(255,255,255,100); border-radius: 3px; }"
+            "QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height: 0px; }"
+        )
+
+        self.history_widget = QWidget()
+        self.history_widget.setStyleSheet("background: transparent;")
+        self.history_layout = QVBoxLayout(self.history_widget)
+        self.history_layout.setContentsMargins(0, 0, 0, 0)
+        self.history_layout.setSpacing(10)
+        self.history_layout.addStretch() # Push everything to bottom
+        
+        self.scroll_area.setWidget(self.history_widget)
+        layout.addWidget(self.scroll_area, stretch=1)
 
         self._update_bg(self._bg_alpha)
 
@@ -323,7 +365,12 @@ class HebrewWindow(QMainWindow):
 
     def _update_font_size(self, value):
         self._font_size = value
-        self.subtitle_label.set_font_size(value)
+        # Update all existing labels
+        for i in range(self.history_layout.count()):
+            item = self.history_layout.itemAt(i)
+            if item and item.widget():
+                if isinstance(item.widget(), StrokeLabel):
+                    item.widget().set_font_size(value)
 
     def _show_controls(self):
         self.ctrl_widget.setVisible(True)
@@ -377,9 +424,27 @@ class HebrewWindow(QMainWindow):
         self._resizing = False
 
     def append_text(self, text):
-        # In a subtitle window, we usually only show the latest translation
-        # to avoid clutter. Or we can keep a small buffer.
-        self.subtitle_label.setText(text)
+        if not text.strip():
+            return
+            
+        # Create a new label for history
+        lbl = StrokeLabel(text, font_size=self._font_size)
+        # Add before the last stretch
+        count = self.history_layout.count()
+        self.history_layout.insertWidget(count - 1, lbl)
+        
+        # Limit history (e.g. 100 entries)
+        if count > 101: 
+            item = self.history_layout.takeAt(0)
+            if item and item.widget():
+                item.widget().deleteLater()
+
+        # Auto-scroll to bottom
+        QTimer.singleShot(50, self._scroll_to_bottom)
+
+    def _scroll_to_bottom(self):
+        v_bar = self.scroll_area.verticalScrollBar()
+        v_bar.setValue(v_bar.maximum())
 
 
 # ---------------------------------------------------------
