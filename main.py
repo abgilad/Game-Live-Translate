@@ -228,7 +228,9 @@ class StrokeLabel(QLabel):
         font.setPointSize(self.font_size)
         font.setBold(True)
         metrics = QFontMetrics(font)
-        line_h = metrics.height() * self.line_spacing
+        
+        # line_h must account for the stroke width
+        line_h = (metrics.height() + self.outline_width) * self.line_spacing
         
         # Approximate size with wrapping
         max_w = self.width() if self.width() > 100 else 800
@@ -236,14 +238,15 @@ class StrokeLabel(QLabel):
         lines_count = 1
         curr_w = 0
         for w in words:
-            w_w = metrics.horizontalAdvance(w + " ")
+            # Word width also needs some extra room for the stroke on sides
+            w_w = metrics.horizontalAdvance(w + " ") + self.outline_width
             if curr_w + w_w > max_w - 40:
                 lines_count += 1
                 curr_w = w_w
             else:
                 curr_w += w_w
         
-        return QSize(max_w, int(lines_count * line_h) + 20)
+        return QSize(max_w, int(lines_count * line_h) + self.outline_width + 20)
 
     def paintEvent(self, event):
         if not self.text():
@@ -257,13 +260,13 @@ class StrokeLabel(QLabel):
         font.setBold(True)
         
         metrics = QFontMetrics(font)
-        line_h = metrics.height() * self.line_spacing
+        line_h = (metrics.height() + self.outline_width) * self.line_spacing
 
         # Handle word wrapping manually for the painter path
         words = self.text().split(' ')
         lines = []
         current_line = ""
-        max_width = self.width() - 40
+        max_width = self.width() - 40 - self.outline_width
         
         for word in words:
             test_line = (current_line + " " + word).strip()
@@ -275,7 +278,8 @@ class StrokeLabel(QLabel):
         lines.append(current_line)
 
         total_height = len(lines) * line_h
-        start_y = (self.height() - total_height) / 2 + metrics.ascent()
+        # Center vertically and account for ascent
+        start_y = (self.height() - total_height) / 2 + metrics.ascent() + self.outline_width/2
 
         for i, line in enumerate(lines):
             path = QPainterPath()
