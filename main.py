@@ -352,6 +352,7 @@ class HebrewWindow(QMainWindow):
         
         # Settings Gear Button
         self.settings_btn = QPushButton("⚙")
+        self.settings_btn.setToolTip("הגדרות")
         self.settings_btn.setFixedSize(30, 30)
         self.settings_btn.setCheckable(True)
         self.settings_btn.setStyleSheet("""
@@ -428,6 +429,7 @@ class HebrewWindow(QMainWindow):
         self.hide_timer.timeout.connect(self._maybe_hide_controls)
         
         self.setMouseTracking(True)
+        self.setToolTip("גרור להזזה") # Drag to move
         central.setMouseTracking(True)
         
         self._resizing = False
