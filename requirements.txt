@@ -1,0 +1,6 @@
+PyQt6
+pyaudiowpatch
+faster-whisper
+numpy
+scipy
+deep-translator
