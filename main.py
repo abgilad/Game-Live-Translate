@@ -354,6 +354,14 @@ class HebrewWindow(QMainWindow):
 
         self._update_bg(self._bg_alpha)
 
+    def clear_history(self):
+        # Remove all widgets except the last stretch
+        while self.history_layout.count() > 1:
+            item = self.history_layout.takeAt(0)
+            if item and item.widget():
+                item.widget().deleteLater()
+        self._scroll_to_bottom()
+
     def _update_bg(self, value):
         self._bg_alpha = value
         self.centralWidget().setStyleSheet(
@@ -529,7 +537,7 @@ class LiveTranslateApp(QMainWindow):
         self.btn_stop.setEnabled(True)
         self.device_combo.setEnabled(False)
         self.text_edit.clear()
-        self.hebrew_window.subtitle_label.clear()
+        self.hebrew_window.clear_history()
 
         with self.audio_queue.mutex:
             self.audio_queue.queue.clear()
