@@ -388,11 +388,11 @@ class HebrewWindow(QMainWindow):
             s_layout.addWidget(slider)
             return slider
 
-        self.slider_font = add_setting("Размер шрифта", 12, 120, self._font_size, self._update_font_size)
-        self.slider_line = add_setting("Межстрочный инт.", 10, 30, self._line_spacing, self._update_line_spacing, 10)
-        self.slider_segment = add_setting("Отступ между фразами", 0, 100, self._segment_spacing, self._update_segment_spacing)
-        self.slider_outline = add_setting("Толщина контура", 0, 15, self._outline_width, self._update_outline_width)
-        self.slider_bg = add_setting("Прозрачность фона", 0, 255, self._bg_alpha, self._update_bg)
+        self.slider_font = add_setting("גודל גופן", 12, 120, self._font_size, self._update_font_size)
+        self.slider_line = add_setting("מרווח בין שורות", 10, 30, self._line_spacing, self._update_line_spacing, 10)
+        self.slider_segment = add_setting("מרווח בין פסקאות", 0, 100, self._segment_spacing, self._update_segment_spacing)
+        self.slider_outline = add_setting("עובי קו מתאר", 0, 15, self._outline_width, self._update_outline_width)
+        self.slider_bg = add_setting("שקיפות רקע", 0, 255, self._bg_alpha, self._update_bg)
 
         layout.addWidget(self.settings_panel)
 
@@ -546,7 +546,7 @@ class HebrewWindow(QMainWindow):
             if self._resizing:
                 diff = event.globalPosition().toPoint() - self._drag_pos
                 new_w = max(400, self.width() + diff.x())
-                new_h = max(200, self.height() + diff.y())
+                new_h = max(80, self.height() + diff.y()) # Lowered min height for slim look
                 self.resize(new_w, new_h)
                 self._drag_pos = event.globalPosition().toPoint()
                 self.settings["window_size"] = [new_w, new_h]
@@ -583,10 +583,9 @@ class HebrewWindow(QMainWindow):
         count = self.history_layout.count()
         self.history_layout.insertWidget(count - 1, lbl)
         
-        # Limit history to 20 segments
-        # count includes labels + 1 stretch + maybe settings panel? 
-        # Actually it's labels + stretch.
-        if self.history_layout.count() > 21: # 20 labels + 1 stretch
+        # Limit history to 2 segments (one top, one bottom)
+        # count includes labels + 1 stretch
+        if self.history_layout.count() > 3: # 2 labels + 1 stretch
             item = self.history_layout.takeAt(0)
             if item and item.widget():
                 item.widget().deleteLater()
